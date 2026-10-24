@@ -1,0 +1,12 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# Local IDE and OS metadata
+.idea/
+.vs/
+.DS_Store
+
+# SFS-specific local deployment artifacts
+*.dll
+*.pdb

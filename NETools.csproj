@@ -1,0 +1,104 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Local fork of https://github.com/cucumber-sp/NETools (v1.1.6), with the Harmony/MonoMod
+    settings-menu patch removed - see src/Main.cs for why. Everything else is unmodified upstream
+    source. Assembly name and ModNameID are kept identical to upstream on purpose: this replaces
+    the broken Mods/NETools/NETools.dll in place so Series (and any other mod depending on
+    "NETools") keeps working against the same assembly identity.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>NETools</AssemblyName>
+    <RootNamespace>NETools</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>none</DebugType>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <NoWarn>$(NoWarn);CS0649;CS0169;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GameManaged Condition="'$(GameManaged)' == '' AND '$(OS)' != 'Windows_NT'">$(HOME)/Library/Application Support/Steam/steamapps/common/Spaceflight Simulator/SpaceflightSimulatorGame.app/Contents/Resources/Data/Managed</GameManaged>
+    <GameManaged Condition="'$(GameManaged)' == '' AND '$(OS)' == 'Windows_NT'">C:\Program Files (x86)\Steam\steamapps\common\Spaceflight Simulator\Spaceflight Simulator_Data\Managed</GameManaged>
+  </PropertyGroup>
+
+  <!-- tools/GenerateCursors is its own separate net8.0 console project (see that folder) - exclude
+       it from the default **/*.cs glob so it isn't swept into this net48 game-mod build. -->
+  <ItemGroup>
+    <Compile Remove="tools/**" />
+    <None Remove="tools/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="assets/icons/cursor-Horizontal.png" LogicalName="NETools.Assets.Icons.cursor-Horizontal.png" />
+    <EmbeddedResource Include="assets/icons/cursor-Vertical.png" LogicalName="NETools.Assets.Icons.cursor-Vertical.png" />
+    <EmbeddedResource Include="assets/icons/cursor-Move.png" LogicalName="NETools.Assets.Icons.cursor-Move.png" />
+    <EmbeddedResource Include="assets/icons/cursor-Rotate.png" LogicalName="NETools.Assets.Icons.cursor-Rotate.png" />
+    <EmbeddedResource Include="assets/icons/cursor-DiagonalNeSw.png" LogicalName="NETools.Assets.Icons.cursor-DiagonalNeSw.png" />
+    <EmbeddedResource Include="assets/icons/cursor-DiagonalNwSe.png" LogicalName="NETools.Assets.Icons.cursor-DiagonalNwSe.png" />
+    <EmbeddedResource Include="assets/icons/gizmo-handle.png" LogicalName="NETools.Assets.Icons.gizmo-handle.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- UnityEngine.CoreModule already bundles its own JetBrains.Annotations types
+         (UsedImplicitlyAttribute etc.), so no separate package is referenced here - adding one
+         causes a CS0433 ambiguous-type clash. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameManaged)/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(GameManaged)/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GameManaged)/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(GameManaged)/UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(GameManaged)/UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(GameManaged)/UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(GameManaged)/UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Compiled against (Patches.cs still defines the [HarmonyPatch] classes as inert, unused
+         metadata) but never invoked at runtime - see src/Main.cs. -->
+    <Reference Include="0Harmony">
+      <HintPath>$(GameManaged)/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UniTask">
+      <HintPath>$(GameManaged)/UniTask.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Replace the broken Mods/NETools/NETools.dll in place: dotnet build -p:Deploy=true -->
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(Deploy)' == 'true'">
+    <PropertyGroup>
+      <ModsFolder Condition="'$(ModsFolder)' == '' AND '$(OS)' != 'Windows_NT'">$(HOME)/Library/Application Support/Steam/steamapps/common/Spaceflight Simulator/SpaceflightSimulatorGame.app/Mods</ModsFolder>
+      <ModsFolder Condition="'$(ModsFolder)' == '' AND '$(OS)' == 'Windows_NT'">C:\Program Files (x86)\Steam\steamapps\common\Spaceflight Simulator\Mods</ModsFolder>
+    </PropertyGroup>
+    <MakeDir Directories="$(ModsFolder)/NETools" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModsFolder)/NETools" />
+    <Message Importance="high" Text="Deployed patched $(TargetFileName) -&gt; $(ModsFolder)/NETools/" />
+  </Target>
+
+</Project>
