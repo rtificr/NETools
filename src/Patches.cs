@@ -1,46 +1,53 @@
 using System;
-using HarmonyLib;
-using SFS.UI;
-
-// ReSharper disable UnusedMember.Local
-// ReSharper disable UnusedType.Local
-// ReSharper disable InconsistentNaming
+using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace NETools
 {
-    static class GameHook
+    /// <summary>
+    /// Observes the settings menu without detouring BasicMenu methods. Harmony detours crash on
+    /// some supported game builds; polling the named menu object keeps this integration passive.
+    /// </summary>
+    internal sealed class GameHook : MonoBehaviour
     {
         internal static readonly GameObject_Local settingsMenu = new() { Value = null };
         internal static event Action OnSettingsMenuClosed;
         internal static event Action OnSettingsMenuOpened;
+        private static GameHook driver;
 
-        [HarmonyPatch(typeof(BasicMenu), nameof(BasicMenu.OnOpen))]
-        class BaseMenu_Open
+        internal static void Initialize()
         {
-            [HarmonyPrefix]
-            static void Prefix(BasicMenu __instance)
-            {
-                if (settingsMenu.Value is null && __instance.gameObject.name == "Settings Menu")
-                    settingsMenu.Value = __instance.gameObject;
-            }
-
-            [HarmonyPostfix]
-            static void Postfix(BasicMenu __instance)
-            {
-                if (__instance.gameObject.name == "Settings Menu")
-                    OnSettingsMenuOpened?.Invoke();
-            }
+            if (driver != null) return;
+            var host = new GameObject("NETools Settings Menu Observer");
+            Object.DontDestroyOnLoad(host);
+            driver = host.AddComponent<GameHook>();
         }
 
-        [HarmonyPatch(typeof(BasicMenu), nameof(BasicMenu.OnClose))]
-        class BaseMenu_Close
+        private void Update()
         {
-            [HarmonyPostfix]
-            static void Postfix(BasicMenu __instance)
+            var activeMenu = GameObject.Find("Settings Menu");
+            if (activeMenu != null)
             {
-                if (__instance.gameObject.name == "Settings Menu")
-                    OnSettingsMenuClosed?.Invoke();
+                if (settingsMenu.Value != activeMenu)
+                {
+                    settingsMenu.Value = activeMenu;
+                    OnSettingsMenuOpened?.Invoke();
+                }
+                return;
             }
+
+            if (settingsMenu.Value == null) return;
+            settingsMenu.Value = null;
+            OnSettingsMenuClosed?.Invoke();
+        }
+
+        private void OnDestroy()
+        {
+            if (driver != this) return;
+            driver = null;
+            if (settingsMenu.Value == null) return;
+            settingsMenu.Value = null;
+            OnSettingsMenuClosed?.Invoke();
         }
     }
 }

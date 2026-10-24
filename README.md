@@ -19,13 +19,23 @@ Reference `NETools.dll` from your mod and add `NETools` as a mod dependency:
 ```csharp
 public override Dictionary<string, string> Dependencies { get; } = new()
 {
-    { "NETools", "1.0.1" }
+    { "NETools", "1.0.2" }
 };
 ```
 
 To opt into NETools' startup update check, implement `IUpdatable` on your mod's main class and
 return the remote file URL and local destination path in `UpdatableFiles`. NETools checks hashes,
 prompts before installing updates, and offers to restart after a successful update.
+
+The hash service host can be changed before update checks run:
+
+```csharp
+ModsUpdater.HashApiBaseUrl = "https://updates.example.com";
+```
+
+That service must implement `GET /api/hashes/md5?file={URL-encoded-download-url}` and return the
+file's raw MD5 digest encoded as Base64. The default host remains
+`https://files.cucumber-space.online`.
 
 ```csharp
 using NETools;

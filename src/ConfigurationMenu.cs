@@ -16,6 +16,7 @@ namespace NETools
     public static class ConfigurationMenu
     {
         static ConfigurationWindow window;
+        static bool initialized;
 
         /// <summary>
         ///     Size of content that you should use while generating content
@@ -24,7 +25,10 @@ namespace NETools
 
         internal static void Initialize()
         {
+            if (initialized) return;
+            initialized = true;
             CreateMenu();
+            GameHook.Initialize();
             GameHook.settingsMenu.OnChange += OnGettingSettingsMenu;
             GameHook.OnSettingsMenuOpened += () => window.Enable();
             GameHook.OnSettingsMenuClosed += () => window.Disable();
@@ -33,11 +37,16 @@ namespace NETools
         // Moving Settings menu right
         static void OnGettingSettingsMenu(GameObject settingsMenu)
         {
-            if (settingsMenu is null)
+            if (settingsMenu == null)
                 return;
-            RectTransform menu = settingsMenu.transform.GetChild(0).GetChild(0) as RectTransform;
-            if (menu is null || !window.ElementsInside)
+
+            // The game's Settings Menu hierarchy has varied between releases. Bail out cleanly
+            // if the expected inner rect is absent rather than breaking the settings menu.
+            var root = settingsMenu.transform;
+            if (root.childCount == 0 || root.GetChild(0).childCount == 0)
                 return;
+            RectTransform menu = root.GetChild(0).GetChild(0) as RectTransform;
+            if (menu == null || window == null || !window.ElementsInside) return;
             menu.pivot = new Vector2(0, 0.5f);
             menu.localPosition = new Vector3(15, 0, 0);
             window.RectTransform.pivot = new Vector2(1, 0.5f);
@@ -61,6 +70,7 @@ namespace NETools
         /// </param>
         public static void Add(string title, (string name, Func<Transform, GameObject> createWindowFunc)[] buttons)
         {
+            if (window == null) Initialize();
             window.AddModeButtons(title, buttons);
         }
     }

@@ -72,12 +72,6 @@
       <HintPath>$(GameManaged)/UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <!-- Compiled against (Patches.cs still defines the [HarmonyPatch] classes as inert, unused
-         metadata) but never invoked at runtime - see src/Main.cs. -->
-    <Reference Include="0Harmony">
-      <HintPath>$(GameManaged)/0Harmony.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
     <Reference Include="UniTask">
       <HintPath>$(GameManaged)/UniTask.dll</HintPath>
       <Private>false</Private>

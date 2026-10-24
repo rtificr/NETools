@@ -15,12 +15,31 @@ using UnityEngine;
 
 namespace NETools
 {
-    internal static class ModsUpdater
+    public static class ModsUpdater
     {
         // Shared HttpClient instance
         static readonly HttpClient Http = new();
+        static string hashApiBaseUrl = "https://files.cucumber-space.online";
         // Tracks how many files were successfully updated
         static int loadedFiles;
+
+        /// <summary>
+        /// Base URL for the MD5 hash service. It must expose
+        /// /api/hashes/md5?file={escaped download URL} and return the MD5 bytes as Base64.
+        /// Set this before update checks run to use your own update domain.
+        /// </summary>
+        public static string HashApiBaseUrl
+        {
+            get => hashApiBaseUrl;
+            set
+            {
+                if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+                    (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+                    throw new ArgumentException("Hash API base URL must be an absolute HTTP(S) URL.", nameof(value));
+
+                hashApiBaseUrl = value.TrimEnd('/');
+            }
+        }
 
         // Entry point for running the update process detached from scene context
         public static void StartUpdate()
@@ -106,7 +125,7 @@ namespace NETools
                     {
                         // Check remote MD5 hash
                         var hashUrl =
-                            $"https://files.cucumber-space.online/api/hashes/md5?file={Uri.EscapeDataString(url)}";
+                            $"{HashApiBaseUrl}/api/hashes/md5?file={Uri.EscapeDataString(url)}";
                         HttpResponseMessage resp = await Http.GetAsync(hashUrl);
                         if (!resp.IsSuccessStatusCode) throw new Exception("Hash request failed");
 
