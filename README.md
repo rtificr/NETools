@@ -10,7 +10,7 @@ nested layout primitives, resizable windows, reusable UI cursor visuals, and sha
 - Native PNG-backed UI cursor and gizmo assets
 - Window resizing and a configurable UI cursor overlay
 - Standard UI elements including closable windows, number inputs, and radio buttons
-- UITools-style opt-in update checks for NETools and dependent mods implementing `IUpdatable`
+- Opt-in update checks for NETools and dependent mods implementing `IUpdatable`
 
 ## Using NETools
 
@@ -19,23 +19,15 @@ Reference `NETools.dll` from your mod and add `NETools` as a mod dependency:
 ```csharp
 public override Dictionary<string, string> Dependencies { get; } = new()
 {
-    { "NETools", "1.0.2" }
+    { "NETools", "1.0.3" }
 };
 ```
 
 To opt into NETools' startup update check, implement `IUpdatable` on your mod's main class and
 return the remote file URL and local destination path in `UpdatableFiles`. NETools checks hashes,
-prompts before installing updates, and offers to restart after a successful update.
-
-The hash service host can be changed before update checks run:
-
-```csharp
-ModsUpdater.HashApiBaseUrl = "https://updates.example.com";
-```
-
-That service must implement `GET /api/hashes/md5?file={URL-encoded-download-url}` and return the
-file's raw MD5 digest encoded as Base64. The default host remains
-`https://files.cucumber-space.online`.
+prompts before installing updates, and offers to restart after a successful update. It downloads
+each update candidate to temporary storage and compares it locally, so `UpdatableFiles` can point
+directly to any HTTP(S) file host without a separate hash service.
 
 ```csharp
 using NETools;

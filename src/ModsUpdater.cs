@@ -19,41 +19,41 @@ namespace NETools
     {
         // Shared HttpClient instance
         static readonly HttpClient Http = new();
-        static string hashApiBaseUrl = "https://files.cucumber-space.online";
         // Tracks how many files were successfully updated
         static int loadedFiles;
+        static bool updateStarted;
 
-        /// <summary>
-        /// Base URL for the MD5 hash service. It must expose
-        /// /api/hashes/md5?file={escaped download URL} and return the MD5 bytes as Base64.
-        /// Set this before update checks run to use your own update domain.
-        /// </summary>
-        public static string HashApiBaseUrl
+        sealed class PendingFile
         {
-            get => hashApiBaseUrl;
-            set
-            {
-                if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
-                    (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
-                    throw new ArgumentException("Hash API base URL must be an absolute HTTP(S) URL.", nameof(value));
+            public readonly FilePath Destination;
+            public readonly string StagedPath;
 
-                hashApiBaseUrl = value.TrimEnd('/');
+            public PendingFile(FilePath destination, string stagedPath)
+            {
+                Destination = destination;
+                StagedPath = stagedPath;
             }
         }
 
         // Entry point for running the update process detached from scene context
-        public static void StartUpdate()
+        internal static void StartUpdate()
         {
+            if (updateStarted) return;
+            updateStarted = true;
             UpdateAll().Forget();
         }
 
         // Main update flow
         static async UniTask UpdateAll()
         {
+            loadedFiles = 0;
+            var tempDir = Path.Combine(Path.GetTempPath(), "ModUpdates", Guid.NewGuid().ToString());
             try
             {
-                // Check which files need updating (based on hash mismatch or failures)
-                var updatesByMod = await GetFilesNeedingUpdate();
+                Directory.CreateDirectory(tempDir);
+                // Download candidate files to temporary storage and compare locally. Any download
+                // URL can be hosted on any domain; no separate hash service is needed.
+                var updatesByMod = await GetFilesNeedingUpdate(tempDir);
                 if (updatesByMod.Count == 0) return;
 
                 // Ask user to confirm update
@@ -69,7 +69,7 @@ namespace NETools
                     Mod mod = entry.Key;
                     var files = entry.Value;
 
-                    if (await TryUpdateMod(mod, files, failedMods)) continue;
+                    if (TryInstallMod(mod, files, failedMods)) continue;
 
                     // Ensure mod is listed in failedMods if any file fails
                     if (!failedMods.ContainsKey(mod))
@@ -82,7 +82,7 @@ namespace NETools
                     foreach (Mod mod in failedMods.Keys.ToList())
                     {
                         var files = updatesByMod[mod];
-                        if (await TryUpdateMod(mod, files, failedMods))
+                        if (TryInstallMod(mod, files, failedMods))
                             failedMods.Remove(mod);
                     }
 
@@ -97,6 +97,15 @@ namespace NETools
             }
             finally
             {
+                try
+                {
+                    if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+                }
+                catch (Exception cleanupError)
+                {
+                    Debug.Log($"[ModUpdater] Could not clean temporary update files: {cleanupError.Message}");
+                }
+
                 // If any files were updated, offer to restart
                 if (loadedFiles > 0)
                     MenuGenerator.OpenConfirmation(CloseMode.Current,
@@ -106,99 +115,54 @@ namespace NETools
             }
         }
 
-        // Returns a dictionary of mods -> files that need updating
-        static async UniTask<Dictionary<Mod, List<(string url, FilePath path)>>> GetFilesNeedingUpdate()
+        // Downloads update candidates to tempDir, compares each against the installed file, and
+        // keeps only changed candidates staged for installation after user confirmation.
+        static async UniTask<Dictionary<Mod, List<PendingFile>>> GetFilesNeedingUpdate(string tempDir)
         {
-            var result = new Dictionary<Mod, List<(string, FilePath)>>();
-            using var md5 = MD5.Create();
-
-            foreach (IUpdatable updatable in Loader.main.GetAllMods().OfType<IUpdatable>())
-            {
-                if (updatable is not Mod mod) continue;
-
-                foreach (var kvp in updatable.UpdatableFiles)
-                {
-                    var url = kvp.Key;
-                    FilePath path = kvp.Value;
-
-                    try
-                    {
-                        // Check remote MD5 hash
-                        var hashUrl =
-                            $"{HashApiBaseUrl}/api/hashes/md5?file={Uri.EscapeDataString(url)}";
-                        HttpResponseMessage resp = await Http.GetAsync(hashUrl);
-                        if (!resp.IsSuccessStatusCode) throw new Exception("Hash request failed");
-
-                        var local = path.FileExists() ? md5.ComputeHash(path.ReadBytes()) : Array.Empty<byte>();
-                        var remoteHashBase64 = await resp.Content.ReadAsStringAsync();
-                        var remote = Convert.FromBase64String(remoteHashBase64);
-
-                        // If hash mismatch, mark for update
-                        if (!local.SequenceEqual(remote))
-                        {
-                            if (!result.ContainsKey(mod))
-                                result[mod] = new List<(string, FilePath)>();
-                            result[mod].Add((url, path));
-                        }
-                    }
-                    catch (HttpRequestException ex)
-                    {
-                        var message = $"[ModUpdater] Network error while checking hash for {url}: {ex.Message}";
-                        if (ex.InnerException != null)
-                            message += "\nInner: " + ex.InnerException.GetType().Name + " - " + ex.InnerException.Message;
-                        Debug.Log(message);
-                    }
-                    catch (FormatException ex)
-                    {
-                        Debug.Log($"[ModUpdater] Invalid base64 hash from server for {url}: {ex.Message}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.Log($"[ModUpdater] Unexpected error while checking hash for {url}: {ex.Message}");
-                    }
-                }
-            }
-            return result;
-        }
-
-        // Attempts to update all files for a single mod atomically
-        static async UniTask<bool> TryUpdateMod(Mod mod, List<(string url, FilePath path)> files,
-            Dictionary<Mod, List<string>> failedMods)
-        {
-            var tempDir = Path.Combine(Path.GetTempPath(), "ModUpdates", Guid.NewGuid().ToString());
-            Directory.CreateDirectory(tempDir);
-
+            var result = new Dictionary<Mod, List<PendingFile>>();
+            var candidates = Loader.main.GetAllMods().OfType<IUpdatable>()
+                .Where(updatable => updatable is Mod)
+                .SelectMany(updatable => updatable.UpdatableFiles.Select(file =>
+                    (Mod: (Mod)updatable, Url: file.Key, Destination: file.Value)))
+                .ToList();
             var semaphore = new SemaphoreSlim(3);
-            var downloads = new List<(FilePath original, string tempPath)>();
-            var failedFiles = new List<string>();
 
-            await UniTask.WhenAll(files.Select(async file =>
+            await UniTask.WhenAll(candidates.Select(async candidate =>
             {
-                var url = file.url;
-                FilePath originalPath = file.path;
-                var tempPath = Path.Combine(tempDir, Path.GetFileName(originalPath));
-
                 await semaphore.WaitAsync();
+                var stagedPath = Path.Combine(tempDir, Guid.NewGuid().ToString("N") + ".download");
                 try
                 {
-                    var success = await Download(url, tempPath);
-                    if (success)
+                    if (!await Download(candidate.Url, stagedPath))
                     {
-                        lock (downloads)
-                        {
-                            downloads.Add((originalPath, tempPath));
-                        }
+                        Debug.Log($"[ModUpdater] Failed to check '{candidate.Url}' for mod '{candidate.Mod.DisplayName}'");
+                        return;
                     }
-                    else
-                    {
-                        var fileName = Path.GetFileName(originalPath);
-                        lock (failedFiles)
-                        {
-                            failedFiles.Add(fileName);
-                        }
 
-                        Debug.Log($"[ModUpdater] Failed to download '{fileName}' for mod '{mod.DisplayName}'");
+                    var localHash = candidate.Destination.FileExists()
+                        ? HashFile(candidate.Destination)
+                        : Array.Empty<byte>();
+                    var remoteHash = HashFile(stagedPath);
+                    if (localHash.SequenceEqual(remoteHash))
+                    {
+                        File.Delete(stagedPath);
+                        return;
                     }
+
+                    lock (result)
+                    {
+                        if (!result.TryGetValue(candidate.Mod, out var files))
+                        {
+                            files = new List<PendingFile>();
+                            result[candidate.Mod] = files;
+                        }
+                        files.Add(new PendingFile(candidate.Destination, stagedPath));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (File.Exists(stagedPath)) File.Delete(stagedPath);
+                    Debug.Log($"[ModUpdater] Error checking update for '{candidate.Url}': {ex.Message}");
                 }
                 finally
                 {
@@ -206,29 +170,32 @@ namespace NETools
                 }
             }));
 
-            // If all downloads succeed, commit updates
-            if (failedFiles.Count == 0)
+            return result;
+        }
+
+        // Installs files already staged by GetFilesNeedingUpdate. Staged copies remain available
+        // if retry is offered, avoiding a second download.
+        static bool TryInstallMod(Mod mod, List<PendingFile> files, Dictionary<Mod, List<string>> failedMods)
+        {
+            var failedFiles = new List<string>();
+
+            foreach (var file in files)
             {
-                foreach ((FilePath original, string tempPath) download in downloads)
-                    File.Copy(download.tempPath, download.original, true);
-
-                loadedFiles += downloads.Count;
-
-                if (Directory.Exists(tempDir))
-                    Directory.Delete(tempDir, true);
-
-                return true;
+                try
+                {
+                    File.Copy(file.StagedPath, file.Destination, true);
+                    loadedFiles++;
+                }
+                catch (Exception ex)
+                {
+                    var fileName = Path.GetFileName(file.Destination);
+                    failedFiles.Add(fileName);
+                    Debug.Log($"[ModUpdater] Failed to install '{fileName}' for mod '{mod.DisplayName}': {ex.Message}");
+                }
             }
 
-            // Record failed files
+            if (failedFiles.Count == 0) return true;
             failedMods[mod] = failedFiles;
-
-            // Clean up downloaded files if not committed
-            foreach ((FilePath original, string tempPath) download in downloads.Where(download =>
-                         File.Exists(download.tempPath)))
-                File.Delete(download.tempPath);
-            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
-
             return false;
         }
 
@@ -237,25 +204,39 @@ namespace NETools
         {
             try
             {
-                HttpResponseMessage resp = await Http.GetAsync(url);
+                using var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
                 if (!resp.IsSuccessStatusCode) return false;
 
-                var data = await resp.Content.ReadAsByteArrayAsync();
-                if (data == null || data.Length == 0) return false;
-
-                File.WriteAllBytes(path, data);
-                return true;
+                using var source = await resp.Content.ReadAsStreamAsync();
+                using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await source.CopyToAsync(destination);
+                return destination.Length > 0;
             }
             catch (Exception ex)
             {
                 Debug.Log($"[ModUpdater] Exception during download: {ex.Message}");
+                if (File.Exists(path)) File.Delete(path);
                 return false;
             }
         }
 
+        static byte[] HashFile(string path)
+        {
+            using var md5 = MD5.Create();
+            using var stream = File.OpenRead(path);
+            return md5.ComputeHash(stream);
+        }
+
+        static byte[] HashFile(FilePath path)
+        {
+            using var md5 = MD5.Create();
+            using var stream = File.OpenRead(path);
+            return md5.ComputeHash(stream);
+        }
+
         // Confirmation prompt before updates begin
         static async UniTask<bool> ConfirmUpdatePrompt(
-            Dictionary<Mod, List<(string url, FilePath path)>> updates)
+            Dictionary<Mod, List<PendingFile>> updates)
         {
             var list = string.Join("\n", updates
                 .OrderBy(kvp => kvp.Key.DisplayName)

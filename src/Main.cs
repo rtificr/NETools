@@ -37,7 +37,7 @@ namespace NETools
         public override string MinimumGameVersionNecessary => "1.5.10.2";
 
         /// <summary>ModVersion</summary>
-        public override string ModVersion => "1.0.2";
+        public override string ModVersion => "1.0.3";
 
         public Dictionary<string, FilePath> UpdatableFiles => new()
         {
@@ -50,8 +50,7 @@ namespace NETools
         /// <summary>Description</summary>
         public override string Description =>
             "Mod that provides advanced UI functionality and used by other mods as dependency. " +
-            "Local fork: the Harmony/MonoMod settings-menu patch that crashes on this game build " +
-            "has been removed; everything else works normally.";
+            "Includes retained layout helpers, image cursors, and opt-in mod updates.";
 
         /// <summary>Early Load</summary>
         public override void Early_Load()
