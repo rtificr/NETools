@@ -10,6 +10,7 @@ nested layout primitives, resizable windows, reusable UI cursor visuals, and sha
 - Native PNG-backed UI cursor and gizmo assets
 - Window resizing and a configurable UI cursor overlay
 - Standard UI elements including closable windows, number inputs, and radio buttons
+- UITools-style opt-in update checks for NETools and dependent mods implementing `IUpdatable`
 
 ## Using NETools
 
@@ -18,9 +19,13 @@ Reference `NETools.dll` from your mod and add `NETools` as a mod dependency:
 ```csharp
 public override Dictionary<string, string> Dependencies { get; } = new()
 {
-    { "NETools", "1.0.0" }
+    { "NETools", "1.0.1" }
 };
 ```
+
+To opt into NETools' startup update check, implement `IUpdatable` on your mod's main class and
+return the remote file URL and local destination path in `UpdatableFiles`. NETools checks hashes,
+prompts before installing updates, and offers to restart after a successful update.
 
 ```csharp
 using NETools;

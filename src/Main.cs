@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using ModLoader;
+using SFS.IO;
 
 namespace NETools
 {
@@ -15,11 +17,11 @@ namespace NETools
     ///     call - it just subscribes to GameHook events that will now never fire, so the settings-page
     ///     integration silently does nothing instead of crashing the whole mod.
     ///
-    ///     The auto-updater is also disabled here (IUpdatable removed, ModsUpdater never invoked) so
-    ///     it can't silently redownload the broken upstream DLL over this fix.
+    ///     Auto-updates follow the original UITools opt-in IUpdatable flow and are only installed
+    ///     after the user confirms the update prompt.
     /// </summary>
     // ReSharper disable once ClassNeverInstantiated.Global
-    public class Main : Mod
+    public class Main : Mod, IUpdatable
     {
         internal static Main main;
 
@@ -42,7 +44,15 @@ namespace NETools
         public override string MinimumGameVersionNecessary => "1.5.10.2";
 
         /// <summary>ModVersion</summary>
-        public override string ModVersion => "1.0.0";
+        public override string ModVersion => "1.0.1";
+
+        public Dictionary<string, FilePath> UpdatableFiles => new()
+        {
+            {
+                "https://github.com/rtificr/NETools/releases/latest/download/NETools.dll",
+                new FolderPath(ModFolder).ExtendToFile("NETools.dll")
+            }
+        };
 
         /// <summary>Description</summary>
         public override string Description =>
@@ -55,6 +65,12 @@ namespace NETools
         {
             ConfigurationMenu.Initialize();
             PositionSaver.Initialize();
+        }
+
+        /// <summary>Load</summary>
+        public override void Load()
+        {
+            ModsUpdater.StartUpdate();
         }
     }
 }
